@@ -1,0 +1,14 @@
+# Ignore python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore PyTorch/large model files
+*.pt
+*.pth
+*.bin
+
+# Ignore virtual environments
+venv/
+.venv/
+env/
