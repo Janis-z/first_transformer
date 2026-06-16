@@ -12,7 +12,7 @@ tokenizer = AutoTokenizer.from_pretrained("gpt2")
 # Define custom special tokens:
 # [SOC] -> Start of Context (marks the beginning of our input/context sequence)
 # [EOC] -> End of Context (marks the end of our input/context sequence)
-special_tokens_dict = {'additional_special_tokens': ['[SOC]', '[EOC]','[PAD]']}
+special_tokens_dict = {'additional_special_tokens': ['[SOS]', '[EOS]','[PAD]']}
 
 # Add the special tokens to the tokenizer vocabulary
 num_added = tokenizer.add_special_tokens(special_tokens_dict)
