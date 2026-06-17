@@ -9,7 +9,7 @@ tokenizer.add_special_tokens({'additional_special_tokens': ['[SOS]', '[EOS]','[P
 class Tokenizer():
 
     @staticmethod
-    def input_to_Embedings(input,context_size):
+    def input_to_Embeddings(input,context_size):
         #all embedings
         embedding = torch.load("Token_Embeddings.pt")
 

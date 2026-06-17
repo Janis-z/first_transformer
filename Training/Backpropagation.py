@@ -5,7 +5,7 @@ import torch.nn as nn
 class Backpropagation(nn.Module):
     
     @staticmethod
-    def calculate(Decoder_list, Encoder_list, linear_layer, output_probabilities, targets, Ids, learningRate, context_size, batch_size):
+    def calculate(Decoder_list, Encoder_list, linear_layer, output_probabilities, targets, Encoder_Ids,Decoder_Ids, learningRate, context_size, batch_size):
 
         #1. Softmax
 
@@ -302,7 +302,7 @@ class Backpropagation(nn.Module):
 
 
 
-
+--------------------------------------------------------------------------------------------------------------------------------
 
 
 

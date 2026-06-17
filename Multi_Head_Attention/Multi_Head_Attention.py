@@ -32,11 +32,11 @@ class MultiHeadAttention(nn.Module):
         Kw = self.Wk(K)
         Vw = self.Wv(V)
 
-        self.cache.update = {
+        self.cache.update ({
             'Qw': Qw,
             'Kw': Kw,
             'Vw': Vw
-        }
+        })
 
 
         seq_len = Qw.shape[1]
