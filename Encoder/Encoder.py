@@ -16,6 +16,8 @@ class Encoder(nn.Module):
         self.cache={
             "add_output_1":None,
             "add_output_2":None,
+            "norm_output_1":None,
+            "norm_output_2":None,
             "mha_output":None,
             "feed_forward_output":None,
         }
@@ -28,12 +30,14 @@ class Encoder(nn.Module):
 
         add_output_1=mha_output+input
 
+        self.cache["norm_output_1"]=norm_input_1
         self.cache["add_output_1"]=add_output_1
         self.cache["mha_output"]=mha_output
 
         norm_input_2=self.norm2.apply_norm(add_output_1)
         feed_forward_output=self.feedforward.calculate(norm_input_2)
         
+        self.cache["norm_output_2"]=norm_input_2
         add_output_2=feed_forward_output+add_output_1
 
         self.cache["add_output_2"]=add_output_2

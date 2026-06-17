@@ -26,6 +26,7 @@ class Norm(nn.Module):
         #(each value - mean)^2 / num of tokens
         variance=torch.var(input,dim=-1, keepdim=True,correction=0)
         
+        self.cache["variance"]=variance
 
         #now apply the formula
         normalized_input=(input-mean)/torch.sqrt(variance + 1e-6)

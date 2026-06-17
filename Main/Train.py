@@ -22,19 +22,18 @@ from Transformer import Transformer
 train_Transformer=Transformer()
 
 #load old transformer values
-#train_Transformer.load_state_dict(torch.load('trained_transformer.pth'))
-#train_Transformer.eval()
+train_Transformer.load_state_dict(torch.load(r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth"))
+
 
 input=[("hi")]
 
-for i in range(11):
+for i in range(2):
     input.append("hi")
 
 print(input)
-train_Transformer.train(input,0.01)
+train_Transformer.train(input,1)
 
 
 #dataset= load_dataset("wikipedia", "20220301.en", split="train",streaming=True)
 
-print("hi")
-torch.save(train_Transformer.state_dict(), r"C:\Users\Praktikant\Downloads\first_transformer\trained_Transformer.pth")
+torch.save(train_Transformer.state_dict(), r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth")

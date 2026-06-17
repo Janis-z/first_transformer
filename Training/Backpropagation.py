@@ -8,6 +8,7 @@ class Backpropagation(nn.Module):
     def calculate(Decoder_list, Encoder_list, linear_layer, output_probabilities, targets, Encoder_Ids,Decoder_Ids, learningRate, context_size, batch_size):
 
         #1. Softmax
+        
 
         # 1. Ensure targets has the shape (batch_size, context_size)
         targets = targets.view(batch_size, context_size)
@@ -44,11 +45,15 @@ class Backpropagation(nn.Module):
         d_input = (loss @ linear_layer.W)
 
 
-        #add derivative 
-        linear_layer.W = linear_layer.W - d_Weights * learningRate
-        linear_layer.b = linear_layer.b - d_bias * learningRate
+        #add derivative
+        #must be done in no_grad because otherwise it is not a tensor
+        with torch.no_grad():
+            linear_layer.W -= d_Weights * learningRate
+            linear_layer.b -= d_bias * learningRate
         
         #3. go through the decoders
+        d_K_combine = torch.zeros(batch_size, context_size, d_model, device=d_input.device)
+        d_V_combine = torch.zeros(batch_size, context_size, d_model, device=d_input.device)
 
         for Decoder in Decoder_list[::-1]:
             
@@ -59,44 +64,66 @@ class Backpropagation(nn.Module):
             #2. Feed-Forward
             FF=Decoder.feedforward
 
-            #count layers backwards
-            #-1 because output not needed
+            # 1. Backpropagate last Feed-Forward layer (weightList[-1])
+            d_Weights = FF.cache["afterReLU"][-1].transpose(-1, -2) @ d_into_ff
+            d_Weights = torch.sum(d_Weights, dim=0)
+            d_Biases = torch.sum(d_into_ff, dim=(0, 1))
+
+            d_input = d_into_ff @ FF.weightList[-1].T
+
+            with torch.no_grad():
+                FF.weightList[-1] -= d_Weights * learningRate
+                FF.biasList[-1] -= d_Biases * learningRate
+
+            d_into_ff = d_input
+
+            # 2. Backpropagate remaining Feed-Forward layers
             for layer_number in reversed(range(FF.layer_count-1)):
 
-                #calculate gradients (calculations in FF_math)
-                #d_into_ff = d_into_ff * relu_mask
-                d_Weights=FF.cache["inputLayer"][layer_number].T @ (d_into_ff)   
-
-                d_Biases=torch.sum(d_into_ff, dim=0)
-
-                d_input=d_into_ff @ FF.weightList[layer_number].T
-
-
-                #add derivative 
-                FF.weightList[layer_number] = FF.weightList[layer_number] - d_Weights * learningRate
-                FF.biasList[layer_number] = FF.biasList[layer_number] - d_Biases * learningRate
-        
-
-                
                 #relu derivative 
                 #all values who were over 1 go through rest doesnt
 
-                if layer_number>0:
-                    relu_mask=(FF.cache["inputLayer"][layer_number-1]>0).float()
+                
+                relu_mask=(FF.cache["inputLayer"][layer_number-1]>0).float()
 
-                    d_into_ff=d_input @ relu_mask
+                d_into_ff=d_input * relu_mask
+                
+
+
+                #calculate gradients (calculations in FF_math)
+                #d_into_ff = d_into_ff * relu_mask
+                #when 0 take norm because thats the input layer
+                if layer_number>0:
+                    d_Weights=torch.sum(FF.cache["afterReLU"][layer_number-1].transpose(-1,-2) @ (d_into_ff),dim=0)   
+                else:
+                    d_Weights=torch.sum(Decoder.cache["norm_output_3"].transpose(-1,-2) @ (d_into_ff),dim=0)
+
+                d_Biases=torch.sum(d_into_ff, dim=(0,1))
+
+                d_input=d_into_ff @ FF.weightList[layer_number].transpose(-1,-2)
+
+
+                #add derivative 
+                with torch.no_grad():
+                    FF.weightList[layer_number] -= d_Weights * learningRate
+                    FF.biasList[layer_number] -= d_Biases * learningRate
+        
+
+                
+                
                 
 
             #3. norm
-            d_beta=torch.sum(d_input,dim=(0,1))
+            d_Beta=torch.sum(d_input,dim=(0,1))
 
-            d_gamma=torch.sum(d_input * Decoder.norm3.cache["normalized_input"],dim=(0,1))
+            d_Gamma=torch.sum(d_input * Decoder.norm3.cache["normalized_input"],dim=(0,1))
 
             d_x_hat=d_input * Decoder.norm3.Gamma
 
             #add derivative 
-            Decoder.norm3.Gamma = Decoder.norm3.Gamma - d_gamma * learningRate
-            Decoder.norm3.beta = Decoder.norm3.beta - d_beta * learningRate
+            with torch.no_grad():
+                Decoder.norm3.Gamma -= d_Gamma * learningRate
+                Decoder.norm3.Beta -= d_Beta * learningRate
 
             #just look in the folder norm_math for the formula
             d_x=(1/(d_model*torch.sqrt(Decoder.norm3.cache["variance"] + 1e-6))) * (
@@ -113,56 +140,58 @@ class Backpropagation(nn.Module):
 
             #6. mha
             #all math functions under mha_math
-            d_WO=Decoder.mha.cache["H"].T @ d_input 
+            d_WO=torch.sum(Decoder.mha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
 
-            d_H= d_input @ Decoder.mha.Wo.T
+            d_H= d_input @ Decoder.mha.Wo.weight.T
 
             #add derivative
-            Decoder.mha.Wo = Decoder.mha.Wo - d_WO * learningRate
+            with torch.no_grad():
+                Decoder.mha.Wo.weight -= d_WO * learningRate
             
 
             #split d_h into num_heads
             d_H_split= d_H.view(batch_size,context_size,Decoder.mha.num_heads,Decoder.mha.head_size).permute(0,2,1,3)
 
-            d_Vw_split= Decoder.mha.cache["H_Split"].transpose(-1,-2) @ d_H_split
+            d_Q_K_Soft = d_H_split @ Decoder.mha.cache["Vw_split"].transpose(-1, -2)
 
-            d_Q_K_Soft= (Decoder.mha.Vw_split.transpose(-1,-2)) @ d_H_split
+            d_Vw_split = Decoder.mha.cache["Q_K_Soft"].transpose(-1, -2) @ d_H_split
 
-            d_S= Decoder.mha.Q_K_Soft * (d_Q_K_Soft - (torch.sum(Decoder.mha.Q_K_Soft * d_Q_K_Soft, dim=-1, keepdim=True)))
+            d_S= Decoder.mha.cache["Q_K_Soft"] * (d_Q_K_Soft - (torch.sum(Decoder.mha.cache["Q_K_Soft"] * d_Q_K_Soft, dim=-1, keepdim=True)))
 
-            d_Q_K= d_S / torch.sqrt(Decoder.mha.head_size)
+            d_Q_K= d_S / (Decoder.mha.head_size ** 0.5)
 
-            d_Qw_split= d_Q_K @ Decoder.mha.Kw_split
+            d_Qw_split= d_Q_K @ Decoder.mha.cache["Kw_split"]
 
-            d_Kw_split= d_Q_K.transpose(-2,-1) @ Decoder.mha.Qw_split
+            d_Kw_split= d_Q_K.transpose(-2,-1) @ Decoder.mha.cache["Qw_split"]
 
             #put all together
-            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mha.seq_len, d_model)
+            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mha.seq_len, d_model)
+            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mha.seq_len, d_model)
+            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
             #weights
-            d_Wq= Decoder.mha.cache["Q"].T @ d_Qw
+            d_Wq= torch.sum(Decoder.mha.cache["Q"].transpose(-1,-2) @ d_Qw, dim=0)
 
-            d_Wk= Decoder.mha.cache["K"].T @ d_Kw
+            d_Wk= torch.sum(Decoder.mha.cache["K"].transpose(-1,-2) @ d_Kw, dim=0)
 
-            d_Wv= Decoder.mha.cache["V"].T @ d_Vw
+            d_Wv= torch.sum(Decoder.mha.cache["V"].transpose(-1,-2) @ d_Vw, dim=0)
 
 
             #add derivative
-            Decoder.mha.Wq = Decoder.mha.Wq - d_Wq * learningRate
-            Decoder.mha.Wk = Decoder.mha.Wk - d_Wk * learningRate
-            Decoder.mha.Wv = Decoder.mha.Wv - d_Wv * learningRate
+            with torch.no_grad():
+                Decoder.mha.Wq.weight -= d_Wq * learningRate
+                Decoder.mha.Wk.weight -= d_Wk * learningRate
+                Decoder.mha.Wv.weight -= d_Wv * learningRate
 
 
             #inputs
-            d_Q= d_Qw @ Decoder.mha.Wq.T
+            d_Q= d_Qw @ Decoder.mha.Wq.weight.T
 
-            d_K= d_Kw @ Decoder.mha.Wk.T
+            d_K= d_Kw @ Decoder.mha.Wk.weight.T
 
-            d_V= d_Vw @ Decoder.mha.Wv.T
+            d_V= d_Vw @ Decoder.mha.Wv.weight.T
 
             #combine K and V because they go to the Encoder
             d_K_combine= d_K_combine + d_K
@@ -175,15 +204,16 @@ class Backpropagation(nn.Module):
 
 
             #7. norm
-            d_beta=torch.sum(d_input,dim=(0,1))
+            d_Beta=torch.sum(d_input,dim=(0,1))
 
-            d_gamma=torch.sum(d_input * Decoder.norm2.cache["normalized_input"],dim=(0,1))
+            d_Gamma=torch.sum(d_input * Decoder.norm2.cache["normalized_input"],dim=(0,1))
 
             d_x_hat=d_input * Decoder.norm2.Gamma
 
             #add derivative 
-            Decoder.norm2.Gamma = Decoder.norm2.Gamma - d_gamma * learningRate
-            Decoder.norm2.beta = Decoder.norm2.beta - d_beta * learningRate
+            with torch.no_grad():
+                Decoder.norm2.Gamma -= d_Gamma * learningRate
+                Decoder.norm2.Beta -= d_Beta * learningRate
 
             #just look in the folder norm_math for the formula
             d_x=(1/(d_model*torch.sqrt(Decoder.norm2.cache["variance"] + 1e-6))) * (
@@ -199,75 +229,78 @@ class Backpropagation(nn.Module):
             #8.mmha
             #same ass mha but tiny change on d_Q_K where a mask is added and end does not split up
             #all math functions under mha_math
-            d_WO=Decoder.mmha.cache["H"].T @ d_input 
+            d_WO=torch.sum(Decoder.mmha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
 
-            d_H= d_input @ Decoder.mmha.Wo.T
+            d_H= d_input @ Decoder.mmha.Wo.weight.T
 
             #add derivative
-            Decoder.mmha.Wo = Decoder.mmha.Wo - d_WO * learningRate
+            with torch.no_grad():
+                Decoder.mmha.Wo.weight -= d_WO * learningRate
             
 
             #split d_h into num_heads
             d_H_split= d_H.view(batch_size,context_size,Decoder.mmha.num_heads,Decoder.mmha.head_size).permute(0,2,1,3)
 
-            d_Vw_split= Decoder.mmha.cache["H_Split"].transpose(-1,-2) @ d_H_split
+            d_Q_K_Soft = d_H_split @ Decoder.mmha.cache["Vw_split"].transpose(-1, -2)
 
-            d_Q_K_Soft= (Decoder.mmha.Vw_split.transpose(-1,-2)) @ d_H_split
+            d_Vw_split = Decoder.mmha.cache["Q_K_Soft"].transpose(-1, -2) @ d_H_split
 
-            d_S= Decoder.mmha.Q_K_Soft * (d_Q_K_Soft - (torch.sum(Decoder.mmha.Q_K_Soft * d_Q_K_Soft, dim=-1, keepdim=True)))
+            d_S= Decoder.mmha.cache["Q_K_Soft"] * (d_Q_K_Soft - (torch.sum(Decoder.mmha.cache["Q_K_Soft"] * d_Q_K_Soft, dim=-1, keepdim=True)))
 
-            d_Q_K= d_S / torch.sqrt(Decoder.mmha.head_size)
+            d_Q_K= d_S / (Decoder.mmha.head_size ** 0.5)
 
             #mask 
-            mask = torch.tril(torch.ones(Decoder.mmha.seq_len, Decoder.mmha.seq_len, device=d_Q_K.device))
+            mask = torch.tril(torch.ones(context_size, context_size, device=d_Q_K.device))
             d_Q_K_Masked = d_Q_K.masked_fill(mask == 0, 0)
 
-            d_Qw_split= d_Q_K_Masked @ Decoder.mmha.Kw_split
+            d_Qw_split= d_Q_K_Masked @ Decoder.mmha.cache["Kw_split"]
 
-            d_Kw_split= d_Q_K_Masked.transpose(-2,-1) @ Decoder.mmha.Qw_split
+            d_Kw_split= d_Q_K_Masked.transpose(-2,-1) @ Decoder.mmha.cache["Qw_split"]
 
             #put all together
-            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mmha.seq_len, d_model)
+            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mmha.seq_len, d_model)
+            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, Decoder.mmha.seq_len, d_model)
+            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
             #weights
-            d_Wq= Decoder.mmha.cache["Q"].T @ d_Qw
+            d_Wq= torch.sum(Decoder.cache["norm_output_1"].transpose(-1,-2) @ d_Qw, dim=0)
 
-            d_Wk= Decoder.mmha.cache["K"].T @ d_Kw
+            d_Wk= torch.sum(Decoder.cache["norm_output_1"].transpose(-1,-2) @ d_Kw, dim=0)
 
-            d_Wv= Decoder.mmha.cache["V"].T @ d_Vw
+            d_Wv= torch.sum(Decoder.cache["norm_output_1"].transpose(-1,-2) @ d_Vw, dim=0)
 
 
             #add derivative
-            Decoder.mmha.Wq = Decoder.mmha.Wq - d_Wq * learningRate
-            Decoder.mmha.Wk = Decoder.mmha.Wk - d_Wk * learningRate
-            Decoder.mmha.Wv = Decoder.mmha.Wv - d_Wv * learningRate
+            with torch.no_grad():
+                Decoder.mmha.Wq.weight -= d_Wq * learningRate
+                Decoder.mmha.Wk.weight -= d_Wk * learningRate
+                Decoder.mmha.Wv.weight -= d_Wv * learningRate
 
 
             #inputs
-            d_Q= d_Qw @ Decoder.mmha.Wq.T
+            d_Q= d_Qw @ Decoder.mmha.Wq.weight.T
 
-            d_K= d_Kw @ Decoder.mmha.Wk.T
+            d_K= d_Kw @ Decoder.mmha.Wk.weight.T
 
-            d_V= d_Vw @ Decoder.mmha.Wv.T
+            d_V= d_Vw @ Decoder.mmha.Wv.weight.T
 
             #all Values go to the output
             d_input=d_Q + d_K + d_V
 
             
             #9. norm
-            d_beta=torch.sum(d_input,dim=(0,1))
+            d_Beta=torch.sum(d_input,dim=(0,1))
 
-            d_gamma=torch.sum(d_input * Decoder.norm1.cache["normalized_input"],dim=(0,1))
+            d_Gamma=torch.sum(d_input * Decoder.norm1.cache["normalized_input"],dim=(0,1))
 
             d_x_hat=d_input * Decoder.norm1.Gamma
 
             #add derivative
-            Decoder.norm1.Gamma = Decoder.norm1.Gamma - d_gamma * learningRate
-            Decoder.norm1.beta = Decoder.norm1.beta - d_beta * learningRate
+            with torch.no_grad():
+                Decoder.norm1.Gamma -= d_Gamma * learningRate
+                Decoder.norm1.Beta -= d_Beta * learningRate
 
             #just look in the folder norm_math for the formula
             d_x=(1/(d_model*torch.sqrt(Decoder.norm1.cache["variance"] + 1e-6))) * (
@@ -283,26 +316,27 @@ class Backpropagation(nn.Module):
 
         #update the token embedings
 
-        Token_Embedings= torch.load("Token_Embeddings.pt")
+        Token_Embeddings= torch.load("Token_Embeddings.pt")
 
-        d_Token_Embeddings = torch.zeros_like(Token_Embedings)
+        d_Token_Embeddings = torch.zeros_like(Token_Embeddings)
 
         #tensor with ids of the input tokens
-        ids_tensor = torch.tensor(Ids, device=d_input.device).view(-1)
+        ids_tensor = torch.tensor(Decoder_Ids, device=d_input.device).view(-1)
         d_input_flat = d_input.view(-1, d_model)
 
         #set values of d_input on the Ids they come from
         d_Token_Embeddings.index_add_(0, ids_tensor, d_input_flat)
 
         #add the gradient to the Token_Embedings
-        Token_Embedings = Token_Embedings - d_Token_Embeddings * learningRate
+        with torch.no_grad():
+            Token_Embeddings -= d_Token_Embeddings * learningRate
 
         #save change
-        torch.save(Token_Embedings, "Token_Embeddings.pt")
+        torch.save(Token_Embeddings, "Token_Embeddings.pt")
 
 
 
---------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------
 
 
 
@@ -321,44 +355,55 @@ class Backpropagation(nn.Module):
             #2. Feed-Forward
             FF=Encoder.feedforward
 
-            #count layers backwards
-            #-1 because output not needed
+            # 1. Backpropagate last Feed-Forward layer (weightList[-1])
+            d_Weights = FF.cache["afterReLU"][-1].transpose(-1, -2) @ d_into_ff
+            d_Weights = torch.sum(d_Weights, dim=0)
+            d_Biases = torch.sum(d_into_ff, dim=(0, 1))
+
+            d_input = d_into_ff @ FF.weightList[-1].T
+
+            with torch.no_grad():
+                FF.weightList[-1] -= d_Weights * learningRate
+                FF.biasList[-1] -= d_Biases * learningRate
+
+            d_into_ff = d_input
+
+            # 2. Backpropagate remaining Feed-Forward layers
             for layer_number in reversed(range(FF.layer_count-1)):
 
-                #calculate gradients (calculations in FF_math)
-                #d_into_ff = d_into_ff * relu_mask
-                d_Weights=FF.cache["inputLayer"][layer_number].T @ (d_into_ff)   
-
-                d_Biases=torch.sum(d_into_ff, dim=0)
-
-                d_input=d_into_ff @ FF.weightList[layer_number].T
-
-
-                #add derivative 
-                FF.weightList[layer_number] = FF.weightList[layer_number] - d_Weights * learningRate
-                FF.biasList[layer_number] = FF.biasList[layer_number] - d_Biases * learningRate
-        
-
-                
                 #relu derivative 
                 #all values who were over 1 go through rest doesnt
+                relu_mask=(FF.cache["inputLayer"][layer_number-1]>0).float()
+                d_into_ff=d_input * relu_mask
 
+                #calculate gradients (calculations in FF_math)
+                #when 0 take norm because thats the input layer
                 if layer_number>0:
-                    relu_mask=(FF.cache["inputLayer"][layer_number-1]>0).float()
+                    d_Weights=torch.sum(FF.cache["afterReLU"][layer_number-1].transpose(-1,-2) @ (d_into_ff),dim=0)   
+                else:
+                    d_Weights=torch.sum(Encoder.cache["norm_output_2"].transpose(-1,-2) @ (d_into_ff),dim=0)
 
-                    d_into_ff=d_input @ relu_mask
+                d_Biases=torch.sum(d_into_ff, dim=(0,1))
+
+                d_input=d_into_ff @ FF.weightList[layer_number].transpose(-1,-2)
+
+                #add derivative 
+                with torch.no_grad():
+                    FF.weightList[layer_number] -= d_Weights * learningRate
+                    FF.biasList[layer_number] -= d_Biases * learningRate
                 
 
             #3. norm
-            d_beta=torch.sum(d_input,dim=(0,1))
+            d_Beta=torch.sum(d_input,dim=(0,1))
 
-            d_gamma=torch.sum(d_input * Encoder.norm2.cache["normalized_input"],dim=(0,1))
+            d_Gamma=torch.sum(d_input * Encoder.norm2.cache["normalized_input"],dim=(0,1))
 
             d_x_hat=d_input * Encoder.norm2.Gamma
 
             #add derivative 
-            Encoder.norm2.Gamma = Encoder.norm2.Gamma - d_gamma * learningRate
-            Encoder.norm2.beta = Encoder.norm2.beta - d_beta * learningRate
+            with torch.no_grad():
+                Encoder.norm2.Gamma -= d_Gamma * learningRate
+                Encoder.norm2.Beta -= d_Beta * learningRate
 
             #just look in the folder norm_math for the formula
             d_x=(1/(d_model*torch.sqrt(Encoder.norm2.cache["variance"] + 1e-6))) * (
@@ -375,56 +420,58 @@ class Backpropagation(nn.Module):
 
             #6. mha
             #all math functions under mha_math
-            d_WO=Encoder.mha.cache["H"].T @ d_input 
+            d_WO=torch.sum(Encoder.mha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
 
-            d_H= d_input @ Encoder.mha.Wo.T
+            d_H= d_input @ Encoder.mha.Wo.weight.T
 
             #add derivative
-            Encoder.mha.Wo = Encoder.mha.Wo - d_WO * learningRate
+            with torch.no_grad():
+                Encoder.mha.Wo.weight -= d_WO * learningRate
             
 
             #split d_h into num_heads
             d_H_split= d_H.view(batch_size,context_size,Encoder.mha.num_heads,Encoder.mha.head_size).permute(0,2,1,3)
 
-            d_Vw_split= Encoder.mha.cache["H_Split"].transpose(-1,-2) @ d_H_split
+            d_Q_K_Soft = d_H_split @ Encoder.mha.cache["Vw_split"].transpose(-1, -2)
 
-            d_Q_K_Soft= (Encoder.mha.Vw_split.transpose(-1,-2)) @ d_H_split
+            d_Vw_split = Encoder.mha.cache["Q_K_Soft"].transpose(-1, -2) @ d_H_split
 
-            d_S= Encoder.mha.Q_K_Soft * (d_Q_K_Soft - (torch.sum(Encoder.mha.Q_K_Soft * d_Q_K_Soft, dim=-1, keepdim=True)))
+            d_S= Encoder.mha.cache["Q_K_Soft"] * (d_Q_K_Soft - (torch.sum(Encoder.mha.cache["Q_K_Soft"] * d_Q_K_Soft, dim=-1, keepdim=True)))
 
-            d_Q_K= d_S / torch.sqrt(Encoder.mha.head_size)
+            d_Q_K= d_S / (Encoder.mha.head_size ** 0.5)
 
-            d_Qw_split= d_Q_K @ Encoder.mha.Kw_split
+            d_Qw_split= d_Q_K @ Encoder.mha.cache["Kw_split"]
 
-            d_Kw_split= d_Q_K.transpose(-2,-1) @ Encoder.mha.Qw_split
+            d_Kw_split= d_Q_K.transpose(-2,-1) @ Encoder.mha.cache["Qw_split"]
 
             #put all together
-            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, Encoder.mha.seq_len, d_model)
+            d_Vw= d_Vw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, Encoder.mha.seq_len, d_model)
+            d_Qw= d_Qw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
-            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, Encoder.mha.seq_len, d_model)
+            d_Kw= d_Kw_split.permute(0,2,1,3).contiguous().view(batch_size, context_size, d_model)
 
             #weights
-            d_Wq= Encoder.mha.cache["Q"].T @ d_Qw
+            d_Wq= torch.sum(Encoder.mha.cache["Q"].transpose(-1,-2) @ d_Qw, dim=0)
 
-            d_Wk= Encoder.mha.cache["K"].T @ d_Kw
+            d_Wk= torch.sum(Encoder.mha.cache["K"].transpose(-1,-2) @ d_Kw, dim=0)
 
-            d_Wv= Encoder.mha.cache["V"].T @ d_Vw
+            d_Wv= torch.sum(Encoder.mha.cache["V"].transpose(-1,-2) @ d_Vw, dim=0)
 
 
             #add derivative
-            Encoder.mha.Wq = Encoder.mha.Wq - d_Wq * learningRate
-            Encoder.mha.Wk = Encoder.mha.Wk - d_Wk * learningRate
-            Encoder.mha.Wv = Encoder.mha.Wv - d_Wv * learningRate
+            with torch.no_grad():
+                Encoder.mha.Wq.weight -= d_Wq * learningRate
+                Encoder.mha.Wk.weight -= d_Wk * learningRate
+                Encoder.mha.Wv.weight -= d_Wv * learningRate
 
 
             #inputs
-            d_Q= d_Qw @ Encoder.mha.Wq.T
+            d_Q= d_Qw @ Encoder.mha.Wq.weight.T
 
-            d_K= d_Kw @ Encoder.mha.Wk.T
+            d_K= d_Kw @ Encoder.mha.Wk.weight.T
 
-            d_V= d_Vw @ Encoder.mha.Wv.T
+            d_V= d_Vw @ Encoder.mha.Wv.weight.T
 
             #combine K and V because they go to the Encoder
             d_K_combine= d_K_combine + d_K
@@ -437,15 +484,16 @@ class Backpropagation(nn.Module):
 
 
             #7. norm
-            d_beta=torch.sum(d_input,dim=(0,1))
+            d_Beta=torch.sum(d_input,dim=(0,1))
 
-            d_gamma=torch.sum(d_input * Encoder.norm1.cache["normalized_input"],dim=(0,1))
+            d_Gamma=torch.sum(d_input * Encoder.norm1.cache["normalized_input"],dim=(0,1))
 
             d_x_hat=d_input * Encoder.norm1.Gamma
 
             #add derivative 
-            Encoder.norm1.Gamma = Encoder.norm1.Gamma - d_gamma * learningRate
-            Encoder.norm1.beta = Encoder.norm1.beta - d_beta * learningRate
+            with torch.no_grad():
+                Encoder.norm1.Gamma -= d_Gamma * learningRate
+                Encoder.norm1.Beta -= d_Beta * learningRate
 
             #just look in the folder norm_math for the formula
             d_x=(1/(d_model*torch.sqrt(Encoder.norm1.cache["variance"] + 1e-6))) * (
@@ -460,19 +508,19 @@ class Backpropagation(nn.Module):
 
         #update the token embedings
 
-        Token_Embedings= torch.load("Token_Embeddings.pt")
+        Token_Embeddings= torch.load("Token_Embeddings.pt")
 
-        d_Token_Embeddings = torch.zeros_like(Token_Embedings)
+        d_Token_Embeddings = torch.zeros_like(Token_Embeddings)
 
         #tensor with ids of the input tokens
-        ids_tensor = torch.tensor(Ids, device=d_input.device).view(-1)
+        ids_tensor = torch.tensor(Encoder_Ids, device=d_input.device).view(-1)
         d_input_flat = d_input.view(-1, d_model)
 
         #set values of d_input on the Ids they come from
         d_Token_Embeddings.index_add_(0, ids_tensor, d_input_flat)
 
         #add the gradient to the Token_Embedings
-        Token_Embedings = Token_Embedings - d_Token_Embeddings * learningRate
+        Token_Embeddings = Token_Embeddings - d_Token_Embeddings * learningRate
 
         #save change
-        torch.save(Token_Embedings, "Token_Embeddings.pt")
+        torch.save(Token_Embeddings, "Token_Embeddings.pt")

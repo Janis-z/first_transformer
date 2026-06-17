@@ -20,6 +20,9 @@ class Decoder(nn.Module):
             "add_output_1":None,
             "add_output_2":None,
             "add_output_3":None,
+            "norm_output_1":None,
+            "norm_output_2":None,
+            "norm_output_3":None,
             "mmha_output":None,
             "mha_output":None,
             "feed_forward_output":None,
@@ -34,17 +37,20 @@ class Decoder(nn.Module):
 
         add_output_1=mmha_output+input
 
+        self.cache["norm_output_1"]=norm_input_1
         self.cache["add_output_1"]=add_output_1
         self.cache["mmha_output"]=mmha_output
 
         print("waaasss")
         
         #Q from Decoder rest from Encoder
+        
         norm_input_2=self.norm2.apply_norm(add_output_1)
         mha_output=self.mha.calculate(norm_input_2,encoder_output,encoder_output)
 
         add_output_2=mha_output+add_output_1
-
+        
+        self.cache["norm_output_2"]=norm_input_2
         self.cache["add_output_2"]=add_output_2
         self.cache["mha_output"]=mha_output
 
@@ -53,6 +59,7 @@ class Decoder(nn.Module):
 
         add_output_3=feed_forward_output+add_output_2
 
+        self.cache["norm_output_3"]=norm_input_3
         self.cache["add_output_3"]=add_output_3
         self.cache["feed_forward_output"]=feed_forward_output
 

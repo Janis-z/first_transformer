@@ -30,8 +30,8 @@ class Transformer(nn.Module):
         self.context_size=1024
         self.num_heads=8
         self.num_layers=6
-        self.batch_size=12
-        self.vokab_size=50259
+        self.batch_size=3
+        self.vokab_size=50260
 
         self.Encoder1=Encoder(self.d_model,self.context_size,self.num_heads, self.num_layers,self.batch_size)
         self.Encoder2=Encoder(self.d_model,self.context_size,self.num_heads, self.num_layers,self.batch_size)
@@ -57,30 +57,30 @@ class Transformer(nn.Module):
 
         Encoder_input=Encoder_Embeddings+Positional_Encoding.unsqueeze(0)
 
-        print(Encoder_input.shape)
+        
 
         for Encoder in self.Encoder_List:
             Encoder_input=Encoder.forward(Encoder_input)
-            print(Encoder_input.shape)
+            
 
         Encoder_output=Encoder_input
         Decoder_input=Encoder_output
 
-        print(Encoder_input.shape)
+        
 
         for Decoder in self.Decoder_List:
             Decoder_input=Decoder.forward(Decoder_input,Encoder_output)
 
-        print("lol")
+        
 
         output=self.LinearLayer1.forward(Decoder_input)
 
         output_probabilities = torch.softmax(output,dim=-1)
 
-        print("hi")
+        
 
-        #Encoder_Embeddings are the target
-        Backpropagation().calculate(self.Decoder_List, self.Encoder_List, self.LinearLayer1, output_probabilities, Encoder_Embeddings,Encoder_Ids,Decoder_Ids,Learningrate,self.context_size, self.batch_size)
+        #Encoder_Ids are the target
+        Backpropagation().calculate(self.Decoder_List, self.Encoder_List, self.LinearLayer1, output_probabilities, Encoder_Ids,Encoder_Ids,Decoder_Ids,Learningrate,self.context_size, self.batch_size)
 
 
 
