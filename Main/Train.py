@@ -15,6 +15,7 @@ from datasets import load_dataset
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, IterableDataset
 
 from Transformer import Transformer
 
@@ -23,12 +24,48 @@ train_Transformer=Transformer()
 
 #load old transformer values
 #train_Transformer.load_state_dict(torch.load(r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth"))
+# Falls nicht schon oben importiert, hier die Klasse definieren:
+class MyIterableDataset(IterableDataset):
+    def __init__(self, generator_function):
+        self.generator_function = generator_function
+        
+    def __iter__(self):
+        return self.generator_function()
 
 
-input=[("hi")]
+#add wikipedia
+def get_wikipedia_batches(batch_size, context_size, lang="en"):
+    print(f"Lade Wikipedia ({lang}) im Streaming-Modus...")
+    # Lädt die Daten live aus dem Netz, ohne die Festplatte zu füllen
+    dataset = load_dataset("wikimedia/wikipedia", f"20231101.{lang}", split="train", streaming=True)
 
-for i in range(2):
-    input.append("hi")
+    def generator():
+        buffer = []
+        for row in dataset:
+            text = row["text"]
+
+            woerter = text.split()
+
+            buffer.extend(woerter)
+            
+            # 2. Sobald der Buffer groß genug für eine Context Size ist, Stücke abschneiden
+            while len(buffer) >= context_size:
+                chunk = buffer[:context_size]
+                buffer = buffer[context_size:]
+                yield torch.tensor(chunk)
+    
+    iterable_dataset = MyIterableDataset(generator)
+    # DataLoader baut automatisch die Batches im Hintergrund zusammen
+    dataloader = DataLoader(iterable_dataset, batch_size=batch_size)
+    return dataloader
+
+
+
+batch_loader = get_wikipedia_batches(batch_size=train_Transformer.batch_size,context_size=train_Transformer.context_size-2)
+
+
+for step, batch in enumerate(batch_loader):
+    print(batch)
 
 print(input)
 train_Transformer.train(input,1)
