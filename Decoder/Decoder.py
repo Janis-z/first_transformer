@@ -29,8 +29,6 @@ class Decoder(nn.Module):
         }
 
     def forward(self,input,encoder_output):
-
-        print("hallos")
         
         norm_input_1=self.norm1.apply_norm(input)
         mmha_output=self.mmha.calculate(norm_input_1,norm_input_1,norm_input_1) 
@@ -40,8 +38,6 @@ class Decoder(nn.Module):
         self.cache["norm_output_1"]=norm_input_1
         self.cache["add_output_1"]=add_output_1
         self.cache["mmha_output"]=mmha_output
-
-        print("waaasss")
         
         #Q from Decoder rest from Encoder
         

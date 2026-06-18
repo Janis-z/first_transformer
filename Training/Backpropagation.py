@@ -7,9 +7,16 @@ class Backpropagation(nn.Module):
     @staticmethod
     def calculate(Decoder_list, Encoder_list, linear_layer, output_probabilities, targets, Encoder_Ids,Decoder_Ids, learningRate, context_size, batch_size):
 
+#Look at the picture of the transformer for better understanding of the build
+#just go backwards from the output 
+#first calculate all decoders(right) then add the outputs oft the mha togethter to get the input for the encoders(left)
+#for better understandings of the math functions look in the folders unbder Training variable names may not fit correctly to the pictures
+#transpose is applied to swap values -1 and -2 means last 2 values - starts from the back
+#sum on dim means summing an that dimension here used to calculate every batch seperatly (dim=0)
+#also look in the folders of the seperate parts to understand the math better like the split of the mha
+#-----------------------------------------------------------------------------------------------------------------------------
         #1. Softmax
-        
-
+#----------------------------------------------------------------------------------------------------------------------------
         # 1. Ensure targets has the shape (batch_size, context_size)
         targets = targets.view(batch_size, context_size)
         
@@ -26,8 +33,9 @@ class Backpropagation(nn.Module):
         # - at the correct positions: (probability - 1)
         # - at all other positions: (probability)
 
-
+#----------------------------------------------------------------------------------------------------------------------------
         #2. Linear Layer
+#-----------------------------------------------------------------------------------------------------------------------------
         vocab_size = linear_layer.W.shape[0]
         d_model = linear_layer.W.shape[1]
 
@@ -50,8 +58,15 @@ class Backpropagation(nn.Module):
         with torch.no_grad():
             linear_layer.W -= d_Weights * learningRate
             linear_layer.b -= d_bias * learningRate
-        
+
+
+
+
+#Decoders
+#-----------------------------------------------------------------------------------------------------------------------------
         #3. go through the decoders
+#----------------------------------------------------------------------------------------------------------------------------
+        #input for the encoder
         d_K_combine = torch.zeros(batch_size, context_size, d_model, device=d_input.device)
         d_V_combine = torch.zeros(batch_size, context_size, d_model, device=d_input.device)
 
@@ -60,8 +75,10 @@ class Backpropagation(nn.Module):
             #1. add split
             d_into_ff=d_input
             d_bypass=d_input
-            
+
+        #--------------------------------------------------------------------------------------------------------            
             #2. Feed-Forward
+        #--------------------------------------------------------------------------------------------------------
             FF=Decoder.feedforward
 
             # 1. Backpropagate last Feed-Forward layer (weightList[-1])
@@ -82,8 +99,7 @@ class Backpropagation(nn.Module):
 
                 #relu derivative 
                 #all values who were over 1 go through rest doesnt
-
-                
+                #see mask in mmha folder
                 relu_mask=(FF.cache["inputLayer"][layer_number-1]>0).float()
 
                 d_into_ff=d_input * relu_mask
@@ -112,8 +128,9 @@ class Backpropagation(nn.Module):
                 
                 
                 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #3. norm
+        #-----------------------------------------------------------------------------------------------------------------
             d_Beta=torch.sum(d_input,dim=(0,1))
 
             d_Gamma=torch.sum(d_input * Decoder.norm3.cache["normalized_input"],dim=(0,1))
@@ -131,14 +148,17 @@ class Backpropagation(nn.Module):
                  - (torch.sum(d_x_hat,dim=-1,keepdim=True)
                  -(Decoder.norm3.cache["normalized_input"] * torch.sum((d_x_hat*Decoder.norm3.cache["normalized_input"]),dim=-1,keepdim=True))))
             
-
+        #-----------------------------------------------------------------------------------------------------------------
             #4. add
+        #-----------------------------------------------------------------------------------------------------------------
             d_input=d_x + d_bypass
 
             #5.add split
             d_bypass=d_input
 
+        #-----------------------------------------------------------------------------------------------------------------
             #6. mha
+        #-----------------------------------------------------------------------------------------------------------------
             #all math functions under mha_math
             d_WO=torch.sum(Decoder.mha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
 
@@ -202,8 +222,9 @@ class Backpropagation(nn.Module):
             #d_Q goes through the decoder
             d_input=d_Q
 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #7. norm
+        #-----------------------------------------------------------------------------------------------------------------
             d_Beta=torch.sum(d_input,dim=(0,1))
 
             d_Gamma=torch.sum(d_input * Decoder.norm2.cache["normalized_input"],dim=(0,1))
@@ -221,12 +242,14 @@ class Backpropagation(nn.Module):
                  - (torch.sum(d_x_hat,dim=-1,keepdim=True)
                  -(Decoder.norm2.cache["normalized_input"] * torch.sum((d_x_hat*Decoder.norm2.cache["normalized_input"]),dim=-1,keepdim=True))))
             
-
+        #-----------------------------------------------------------------------------------------------------------------
             #7.add
+        #-----------------------------------------------------------------------------------------------------------------
             d_input=d_x + d_bypass
 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #8.mmha
+        #-----------------------------------------------------------------------------------------------------------------
             #same ass mha but tiny change on d_Q_K where a mask is added and end does not split up
             #all math functions under mha_math
             d_WO=torch.sum(Decoder.mmha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
@@ -289,8 +312,9 @@ class Backpropagation(nn.Module):
             #all Values go to the output
             d_input=d_Q + d_K + d_V
 
-            
+        #-----------------------------------------------------------------------------------------------------------------
             #9. norm
+        #-----------------------------------------------------------------------------------------------------------------
             d_Beta=torch.sum(d_input,dim=(0,1))
 
             d_Gamma=torch.sum(d_input * Decoder.norm1.cache["normalized_input"],dim=(0,1))
@@ -308,8 +332,9 @@ class Backpropagation(nn.Module):
                  - (torch.sum(d_x_hat,dim=-1,keepdim=True)
                  -(Decoder.norm1.cache["normalized_input"] * torch.sum((d_x_hat*Decoder.norm1.cache["normalized_input"]),dim=-1,keepdim=True))))
 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #10. add
+        #-----------------------------------------------------------------------------------------------------------------
             d_input= d_bypass + d_x
 
             #this input goes into the next decoder till it reaches the end
@@ -336,6 +361,8 @@ class Backpropagation(nn.Module):
 
 
 
+
+#Encoder
 #--------------------------------------------------------------------------------------------------------------------------------
 
 
@@ -343,16 +370,19 @@ class Backpropagation(nn.Module):
         #add d_K_combine and d_V_combine to get the Encoder Input
         d_input = d_K_combine+ d_V_combine
         
-
+#-----------------------------------------------------------------------------------------------------------------
         #4. Go through Encoder
+#-----------------------------------------------------------------------------------------------------------------
         #same as decoder but without the mmha
         for Encoder in Encoder_list[::-1]:
             
             #1. add split
             d_into_ff=d_input
             d_bypass=d_input
-            
+
+        #-----------------------------------------------------------------------------------------------------------------
             #2. Feed-Forward
+        #-----------------------------------------------------------------------------------------------------------------
             FF=Encoder.feedforward
 
             # 1. Backpropagate last Feed-Forward layer (weightList[-1])
@@ -392,8 +422,9 @@ class Backpropagation(nn.Module):
                     FF.weightList[layer_number] -= d_Weights * learningRate
                     FF.biasList[layer_number] -= d_Biases * learningRate
                 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #3. norm
+        #-----------------------------------------------------------------------------------------------------------------
             d_Beta=torch.sum(d_input,dim=(0,1))
 
             d_Gamma=torch.sum(d_input * Encoder.norm2.cache["normalized_input"],dim=(0,1))
@@ -411,14 +442,17 @@ class Backpropagation(nn.Module):
                  - (torch.sum(d_x_hat,dim=-1,keepdim=True)
                  -(Encoder.norm2.cache["normalized_input"] * torch.sum((d_x_hat*Encoder.norm2.cache["normalized_input"]),dim=-1,keepdim=True))))
             
-
+        #-----------------------------------------------------------------------------------------------------------------
             #4. add
+        #-----------------------------------------------------------------------------------------------------------------
             d_input=d_x + d_bypass
 
             #5.add split
             d_bypass=d_input
 
+        #-----------------------------------------------------------------------------------------------------------------
             #6. mha
+        #-----------------------------------------------------------------------------------------------------------------
             #all math functions under mha_math
             d_WO=torch.sum(Encoder.mha.cache["H"].transpose(-1,-2) @ d_input, dim=0)
 
@@ -482,8 +516,9 @@ class Backpropagation(nn.Module):
             #d_Q goes through the decoder
             d_input=d_Q
 
-
+        #-----------------------------------------------------------------------------------------------------------------
             #7. norm
+        #-----------------------------------------------------------------------------------------------------------------
             d_Beta=torch.sum(d_input,dim=(0,1))
 
             d_Gamma=torch.sum(d_input * Encoder.norm1.cache["normalized_input"],dim=(0,1))
@@ -501,8 +536,9 @@ class Backpropagation(nn.Module):
                  - (torch.sum(d_x_hat,dim=-1,keepdim=True)
                  -(Encoder.norm1.cache["normalized_input"] * torch.sum((d_x_hat*Encoder.norm1.cache["normalized_input"]),dim=-1,keepdim=True))))
             
-
+        #-----------------------------------------------------------------------------------------------------------------
             #7.add
+        #-----------------------------------------------------------------------------------------------------------------
             d_input=d_x + d_bypass
 
 

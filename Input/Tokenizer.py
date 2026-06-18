@@ -56,8 +56,8 @@ class Tokenizer():
         encoder_Ids=torch.tensor(encoder_Ids)
 
 
-        return (torch.tensor(embedding[decoder_Ids]),decoder_Ids,
-                torch.tensor(embedding[encoder_Ids]),encoder_Ids)
+        return (embedding[decoder_Ids].detach().clone(),decoder_Ids,
+                embedding[encoder_Ids].detach().clone(),encoder_Ids)
 
     
     def input_to_targets(input,context_size,batch_size):
