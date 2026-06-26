@@ -25,8 +25,8 @@ class Tokenizer():
             tokens.extend(tokenizer.tokenize(Batch))
             
             #if the input is to long return
-            #+2 because of sos and eos
-            if len(tokens)-(context_size+2)>0:
+            #+1 because of eos
+            if len(tokens)-(context_size+1)>0:
                 return None
 
             #Encoder doesnt need SOS so delete it

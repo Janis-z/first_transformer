@@ -39,14 +39,15 @@ class MultiHeadAttention(nn.Module):
         })
 
 
+        batch_size = Qw.shape[0]
         seq_len = Qw.shape[1]
 
         #split into multiple heads
         #first put seq_len first then switch with num_heads to get (num_heads, seq_len, head_size)
         #permute says what position the values go by there previouse order
-        Qw_split = Qw.view(self.batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
-        Kw_split = Kw.view(self.batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
-        Vw_split = Vw.view(self.batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
+        Qw_split = Qw.view(batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
+        Kw_split = Kw.view(batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
+        Vw_split = Vw.view(batch_size, seq_len, self.num_heads, self.head_size).permute(0,2,1,3)
         
 
         self.cache.update({
@@ -67,7 +68,7 @@ class MultiHeadAttention(nn.Module):
 
         #allign the values back
         #permute alligns, contiguous aligns in storage(permute doesnt do that), view just puts all dimensions together like stacking all the single heads, to get d_model back
-        H=H_Split.permute(0,2,1,3).contiguous().view(self.batch_size, seq_len, self.d_model)
+        H=H_Split.permute(0,2,1,3).contiguous().view(batch_size, seq_len, self.d_model)
 
         #calculate output
         output=self.Wo(H)

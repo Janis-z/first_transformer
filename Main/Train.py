@@ -20,57 +20,46 @@ from torch.utils.data import DataLoader, IterableDataset
 from Transformer import Transformer
 
 
-train_Transformer=Transformer()
+train_Transformer=Transformer(2)
 
 #load old transformer values
 #train_Transformer.load_state_dict(torch.load(r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth"))
-# Falls nicht schon oben importiert, hier die Klasse definieren:
-class MyIterableDataset(IterableDataset):
-    def __init__(self, generator_function):
-        self.generator_function = generator_function
-        
-    def __iter__(self):
-        return self.generator_function()
 
-
-#add wikipedia
-def get_wikipedia_batches(batch_size, context_size, lang="en"):
-    print(f"Lade Wikipedia ({lang}) im Streaming-Modus...")
-    # Lädt die Daten live aus dem Netz, ohne die Festplatte zu füllen
-    dataset = load_dataset("wikimedia/wikipedia", f"20231101.{lang}", split="train", streaming=True)
-
-    def generator():
-        buffer = []
-        for row in dataset:
-            text = row["text"]
-
-            woerter = text.split()
-
-            buffer.extend(woerter)
-            
-            # 2. Sobald der Buffer groß genug für eine Context Size ist, Stücke abschneiden
-            while len(buffer) >= context_size:
-                chunk = buffer[:context_size]
-                buffer = buffer[context_size:]
-                yield torch.tensor(chunk)
-    
-    iterable_dataset = MyIterableDataset(generator)
-    # DataLoader baut automatisch die Batches im Hintergrund zusammen
-    dataloader = DataLoader(iterable_dataset, batch_size=batch_size)
-    return dataloader
+#train on only a bit because my laptop dies 
+for i in range(50):
+    input=[["hello how are u?"]]
+    input.append("hello how are u?")
+    #0.000005 because above is to much and values turn to nan
+    train_Transformer.train(input,0.000005)   
+    torch.save(train_Transformer.state_dict(), r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth")
+    print(i)
 
 
 
-batch_loader = get_wikipedia_batches(batch_size=train_Transformer.batch_size,context_size=train_Transformer.context_size-2)
+#wikipedia trainer under here
 
-
-for step, batch in enumerate(batch_loader):
-    print(batch)
-
-print(input)
-train_Transformer.train(input,1)
-
-print("lool")
-#dataset= load_dataset("wikipedia", "20220301.en", split="train",streaming=True)
-
-torch.save(train_Transformer.state_dict(), r"C:\Users\Praktikant\Downloads\first_transformer\trained_transformer.pth")
+# from datasets import load_dataset
+# 
+# # Load Wikipedia en
+# dataset = load_dataset("wikimedia/wikipedia", "20231101.en")
+# 
+# 
+# #chunksize 600 to get around 1024 batches
+# chunk=600
+# input=[]
+# for num,article in enumerate(dataset["train"]):
+# 
+#     article_length=len(article["text"])
+# 
+#     for text_start in range(0,article_length, chunk):
+# 
+#         input.append(article["text"][text_start:text_start+chunk])
+# 
+#         if len(input)==3:
+#             train_Transformer.train(input,0.04)
+#             input=[]
+#         print(text_start)
+# 
+#     print(num)
+#     torch.save(train_Transformer.state_dict(), r"C:\Users\Janis\Downloads\Transformer\trained_transformer.pth")
+ 

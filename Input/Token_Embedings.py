@@ -32,16 +32,18 @@ embedding_dim = 512
 
 # Initialize the full token embedding matrix for the entire vocabulary
 # This now contains 50,259 rows (one for each token, including [SOC] and [EOC]) and 512 columns.
-token_embedding_layer = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim)
+if __name__ == "__main__":
+    token_embedding_layer = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim)
 
-# Extract the entire embedding weight matrix (shape: [vocab_size, embedding_dim])
-full_embedding_matrix = token_embedding_layer.weight
+    # Extract the entire embedding weight matrix (shape: [vocab_size, embedding_dim])
+    full_embedding_matrix = token_embedding_layer.weight
 
-# Save the entire vocabulary embedding matrix to disk
-save_path = "Token_Embeddings.pt"
-torch.save(full_embedding_matrix, save_path)
+    # Save the entire vocabulary embedding matrix to disk
+    save_path = "Token_Embeddings.pt"
+    torch.save(full_embedding_matrix, save_path)
 
-print(f"Total vocabulary size (including custom special tokens): {vocab_size}")
-print(f"Generated entire embedding matrix shape: {full_embedding_matrix.shape}")
-print(f"Saved complete embedding matrix to: {save_path}")
+    print(f"Total vocabulary size (including custom special tokens): {vocab_size}")
+    print(f"Generated entire embedding matrix shape: {full_embedding_matrix.shape}")
+    print(f"Saved complete embedding matrix to: {save_path}")
+
 

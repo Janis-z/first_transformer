@@ -4,7 +4,7 @@ import torch.nn as nn
 class LinearLayer(nn.Module):
     def __init__(self, d_model,vokab_size):
         super(LinearLayer, self).__init__()
-        self.W = nn.Parameter(torch.randn(vokab_size, d_model))
+        self.W = nn.Parameter(torch.randn(vokab_size, d_model) * 0.02)
         self.b = nn.Parameter(torch.zeros(vokab_size))
 
         self.cache = {

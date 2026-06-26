@@ -1,4 +1,3 @@
-from Input import Token_Embedings
 import torch
 import torch.nn as nn
 
@@ -28,10 +27,16 @@ class Backpropagation(nn.Module):
         for b in range(batch_size):
             loss[b, torch.arange(context_size), targets[b]] -= 1.0
             
+        # 4. Mask out the loss for positions that correspond to [PAD] (id: 50259)
+        # This prevents the model from learning to predict padding tokens
+        pad_mask = (targets == 50259)  # Shape: (batch_size, context_size)
+        loss[pad_mask] = 0.0
+
         # 'loss' now has the shape (batch_size, context_size, vocab_size)
         # and contains:
         # - at the correct positions: (probability - 1)
         # - at all other positions: (probability)
+        # - at [PAD] positions: 0.0
 
 #----------------------------------------------------------------------------------------------------------------------------
         #2. Linear Layer

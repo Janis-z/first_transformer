@@ -23,14 +23,14 @@ import torch.nn as nn
 
 class Transformer(nn.Module):
 
-    def __init__(self):
+    def __init__(self,batch_size):
         super().__init__()
 
         self.d_model=512
         self.context_size=1024
         self.num_heads=8
         self.num_layers=6
-        self.batch_size=3
+        self.batch_size=batch_size
         self.vokab_size=50260
 
         self.Encoder1=Encoder(self.d_model,self.context_size,self.num_heads, self.num_layers,self.batch_size)
@@ -77,10 +77,50 @@ class Transformer(nn.Module):
 
         output_probabilities = torch.softmax(output,dim=-1)
 
-        
 
         #Encoder_Ids are the target
         Backpropagation().calculate(self.Decoder_List, self.Encoder_List, self.LinearLayer1, output_probabilities, Encoder_Ids,Encoder_Ids,Decoder_Ids,Learningrate,self.context_size, self.batch_size)
+
+
+
+
+    def use(self,input):
+
+        Decoder_Embeddings,Decoder_Ids,Encoder_Embeddings,Encoder_Ids = Tokenizer.input_to_Embeddings(input,self.context_size)
+
+        Positional_Encoding=torch.load("Positional_Encoding.pt")
+
+        Encoder_input=Encoder_Embeddings+Positional_Encoding.unsqueeze(0)
+
+        
+
+        for Encoder in self.Encoder_List:
+            Encoder_input=Encoder.forward(Encoder_input)
+            
+
+        Encoder_output=Encoder_input
+        Decoder_input=Encoder_output
+
+        
+
+        for Decoder in self.Decoder_List:
+            Decoder_input=Decoder.forward(Decoder_input,Encoder_output)
+
+        
+
+        output=self.LinearLayer1.forward(Decoder_input)
+
+        output_probabilities = torch.softmax(output,dim=-1)
+
+        best_token_indices = torch.argmax(output_probabilities, dim=-1)
+
+        token_ids = best_token_indices[0].tolist()
+
+        decoded_text = tokenizer.decode(token_ids)
+
+        return decoded_text
+
+
 
 
 

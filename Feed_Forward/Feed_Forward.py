@@ -21,13 +21,13 @@ class FeedForward(nn.Module):
         }
 
         #first layer is smaller so sepratly
-        self.W1 = nn.Parameter(torch.randn(self.inputLayer_size, self.hiddenLayer_size))
+        self.W1 = nn.Parameter(torch.randn(self.inputLayer_size, self.hiddenLayer_size) * 0.02)
         self.b1 = nn.Parameter(torch.zeros(self.hiddenLayer_size))
 
         self.weightList.append(self.W1)
         self.biasList.append(self.b1)
 
-        self.W_output = nn.Parameter(torch.randn(self.hiddenLayer_size, self.outputLayer_size))
+        self.W_output = nn.Parameter(torch.randn(self.hiddenLayer_size, self.outputLayer_size) * 0.02)
         self.b_output = nn.Parameter(torch.zeros(self.outputLayer_size))
 
         #for layercount create weights and biases
@@ -35,7 +35,7 @@ class FeedForward(nn.Module):
             weights_name = f"W{i}"
             bias_name = f"b{i}"
 
-            weights = nn.Parameter(torch.randn(self.hiddenLayer_size, self.hiddenLayer_size))
+            weights = nn.Parameter(torch.randn(self.hiddenLayer_size, self.hiddenLayer_size) * 0.02)
             bias = nn.Parameter(torch.zeros(self.hiddenLayer_size))
 
             setattr(self, weights_name, weights)
